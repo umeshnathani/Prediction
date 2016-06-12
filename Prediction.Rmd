@@ -1,0 +1,161 @@
+---
+title: "PredictionAssn"
+author: "Umesh Nathani"
+date: "June 9, 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Prediction Assignment
+One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, our goal is to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants.We aim to predict the manner in which the  did the exercise.
+
+
+This documet is organised as follows:
+
+
+1. Data Description
+
+      1.1 Loading Data
+
+      1.2 Data Cleaning and Cross Validation
+
+2. Cross Validation
+
+3. Preparing training data for model building
+
+4. Model Building - Steps 1 to 3
+
+      4.1 Feature Selection
+
+      4.2 Preparing training data for fitting the model cross validation data for prediction using fitted model
+
+      4.3 Fitting model using Random forest
+
+5. Model SUmmary 
+
+6. Prediction results on cross Validation set
+
+7. Out of sample Error
+
+8. Predicting test data
+
+
+##1. Data Description
+The training set has several observations for the features on the Euler angles roll, pith and yaw as well as the  raw accelerometer, gyroscope and magnetometer readings. Features calculated include -  mean, variance, standard deviation, max, min, amplitude, kurtosis and skewness. The classification variable 'classe' has five levels - A,B,C,D,E. A implies excercise routine was correctly followed while E means the activity was not done well.   
+
+
+### 1.1 Loading Data
+```{r}
+library(caret)
+library(ggplot2)
+trainData <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv")
+testData <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv")
+```
+
+
+### 1.2 Data Cleaning and Cross Validation
+
+Since our testing data does not contain observations with aggregate features, we will leave out these observations from our training set. In other words we will leave out the observations with new_window='yes'
+
+```{r}
+trainFeat <- trainData[trainData$new_window=="no",] #Removing observations with aggregate features.
+```
+
+
+## 2. Cross Validation
+We split the training set into a 30-70 training and cross-validation set using the createDatePartition from the Caret package. The testing data set will be used directly for prediction. While we can also use a larger value of p, Random forest works well with small number of p as well. Further, using a small value of p will reduce computational time for the purpose of this assignment.
+
+```{r}
+inTrain <- createDataPartition(y=trainFeat$classe,p=0.3,list=FALSE)
+training <- trainFeat[inTrain,]
+testing <- trainFeat[-inTrain,]#This is the cross validation set
+```
+
+
+## 3. Preparing training data for model building
+```{r}
+#identitifying class of each column in database
+classCol <- lapply(training,class) 
+
+#Extracting all columns with numeric data type to get measurements from four sensors
+numCol <- classCol[classCol=="numeric"] 
+numtrainFeat <- training[,unlist(names(numCol))] 
+
+#Redifning training data to include classe variable and numeric columns for feeature extraction 
+isNa <-lapply(numtrainFeat,function(x) any(is.na(x)))
+training <- training[,c(names(isNa[isNa =="FALSE"]),"classe")]
+```
+
+
+# 4. Model Building - Steps 1 to 3
+
+
+### 4.1. Feature Selection
+The training dataset curretnly contains a total of 96 features. Acccording to the research paper based on this study <http://groupware.les.inf.puc-rio.br/public/papers/2013.Velloso.QAR-WLE.pdf> - "For the Euler angles of each of the four sensors we calculated eight features: mean, variance, standard deviation, max, min, amplitude, kurtosis and skewness, generating in total 96 derived feature sets". In order to remove redundant fetaures without significantly increasing the bias in our model,  we perform a correlation study. Using a correlation matrix, we remove features which have average pairwise correlation greater than 0.5. This leaves us with a much smaller set of features with low correlation which can them be used to build our predictive model using the Random Forest feature selection process.   
+
+
+```{r}
+correlationMatrix <- cor(training[,c(1:ncol(training)-1)])
+#finding columns with correlation greater than 0.5
+highlyCorrelated <- findCorrelation(correlationMatrix, cutoff=0.50)
+#defining dataframe that contains columns with correaltion < 0.5
+featCol <- correlationMatrix[-highlyCorrelated,-highlyCorrelated]
+```
+### List of features matching our correlation criteria:
+
+
+```{r}
+colnames(featCol)
+```
+
+
+
+### 4.2. Preparing training data for fitting the model cross validation data for prediction using fitted model
+
+```{r}
+training <- training[,c(colnames(featCol),"classe")]#Appending classe variable
+testing <- testing[,c(colnames(featCol),"classe")]#Appending classe variable
+testData <- testData[,c(colnames(featCol))]#Final Test Data
+```
+
+
+### 4.3. Fitting model using Random forest
+
+Random forests are suitable for this problem as they can deal with "small n large p"-problems, high-order interactions, correlated predictor variable. Further, they are are used not only for prediction, but also to assess variable importance.Using trainControl, we set k-folds paramter= 5 and we allow for parallel processing to speed up. 
+
+```{r}
+modFit<- train(classe ~ .,data=training,method="rf",trControl=trainControl(method="cv",number=5),prox=TRUE,allowParallel=TRUE)
+```
+
+## 5 Model SUmmary
+
+Following is the model summary 
+
+```{r}
+modFit
+```
+
+
+## 6 Prediction results on Cross Validation Set
+```{r}
+#prediction
+pred <- predict(modFit,testing);testing$predRight <- pred==testing$classe
+table(pred,testing$classe)# This wil generate a table that compares predicted classe vs actual classe 
+tab <- table(pred,testing$classe)
+confusionMatrix(tab)
+```
+
+## 7. Out of sample Error
+
+According to the confusion Matrix our accuracy is 96%. Thus the estimated out of sample error is 4%. 
+
+## 8. Predicting test data 
+
+```{r}
+pred <- predict(modFit,testData)
+pred
+```
